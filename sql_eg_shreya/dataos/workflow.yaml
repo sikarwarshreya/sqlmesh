@@ -1,0 +1,25 @@
+name: wf-sqlmesh-sync
+type: sqlmesh
+version: v1
+workflow:
+  dag:
+  - name: dg-sqlmesh-sync
+    spec:
+      job:
+        explain: true
+        inputs:
+        - input: dataos/
+          name: sqlmesh_input
+        logLevel: INFO
+        outputs:
+        - dataset: dataos//config.yaml
+          description: The dataset contains Adobe 2024 search data
+          format: iceberg
+          name: output
+          options:
+            saveMode: append
+        steps:
+        - sqlmesh plan dev
+        - sqlmesh ui
+      stack: sqlmesh
+      tempVolume: 10Gi
