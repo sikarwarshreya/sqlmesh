@@ -1,0 +1,26 @@
+name: wf-sqlmesh-sync-_daily
+type: sqlmesh
+version: v1
+workflow:
+  cron: '@daily'
+  dag:
+  - name: dg-sqlmesh-sync
+    spec:
+      job:
+        explain: true
+        inputs:
+        - input: ./workflows
+          name: sqlmesh_input
+        logLevel: INFO
+        outputs:
+        - dataset: ./workflows/config.yaml
+          description: The dataset contains Adobe 2024 search data
+          format: iceberg
+          name: output
+          options:
+            saveMode: append
+        steps:
+        - sqlmesh plan dev
+        - sqlmesh ui
+      stack: sqlmesh
+      tempVolume: 10Gi

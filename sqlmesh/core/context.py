@@ -124,6 +124,9 @@ from sqlmesh.utils.errors import (
 from sqlmesh.utils.config import print_config
 from sqlmesh.utils.jinja import JinjaMacroRegistry
 
+from croniter import croniter
+from datetime import datetime, timedelta
+
 if t.TYPE_CHECKING:
     from typing_extensions import Literal
 
@@ -269,6 +272,7 @@ class ExecutionContext(BaseContext):
     @cached_property
     def _model_tables(self) -> t.Dict[str, str]:
         """Returns a mapping of model names to tables."""
+        print(to_table_mapping(self.snapshots.values(), self.deployability_index))
         return to_table_mapping(self.snapshots.values(), self.deployability_index)
 
     @property
@@ -2013,15 +2017,15 @@ class GenericContext(BaseContext, t.Generic[C]):
         if completion_status.is_nothing_to_do:
             next_run_ready_msg = ""
 
-            next_ready_interval_start = get_next_model_interval_start(snapshots.values())
-            if next_ready_interval_start:
-                utc_time = format_tz_datetime(next_ready_interval_start)
-                local_time = format_tz_datetime(next_ready_interval_start, use_local_timezone=True)
+            next_start, cron_expressions = get_next_model_interval_start(snapshots.values())
+            if next_start:
+                utc_time = format_tz_datetime(next_start)
+                local_time = format_tz_datetime(next_start, use_local_timezone=True)
                 time_msg = local_time if local_time == utc_time else f"{local_time} ({utc_time})"
                 next_run_ready_msg = f"\n\nNext run will be ready at {time_msg}."
 
             self.console.log_status_update(
-                f"No models are ready to run. Please wait until a model `cron` interval has elapsed.{next_run_ready_msg}"
+                f"No models are ready to run. Please wait until a model `cron` interval has elapsed.{next_run_ready_msg} ...{snapshots.values()}... testing {cron_expressions}"
             )
 
         return completion_status
@@ -2296,3 +2300,5 @@ class GenericContext(BaseContext, t.Generic[C]):
 
 class Context(GenericContext[Config]):
     CONFIG_TYPE = Config
+
+

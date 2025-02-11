@@ -2085,13 +2085,18 @@ def _check_ready_intervals(
     return checked_intervals
 
 
-def get_next_model_interval_start(snapshots: t.Iterable[Snapshot]) -> t.Optional[datetime]:
+def get_next_model_interval_start(snapshots: t.Iterable[Snapshot]) -> t.Tuple[t.Optional[datetime], t.List[str]]:
     now_dt = now()
 
-    starts = [
-        snap.node.cron_next(now_dt)
-        for snap in snapshots
-        if snap.is_model and not snap.is_symbolic and not snap.is_seed
-    ]
+    starts = []
+    cron_expressions = []
 
-    return min(starts) if starts else None
+    for snap in snapshots:
+        cron_expressions.append(snap.node.cron)  # Assuming `snap.node.cron` contains the cron expression
+        
+        if snap.is_model and not snap.is_symbolic and not snap.is_seed:
+            starts.append(snap.node.cron_next(now_dt))
+
+    next_start = min(starts) if starts else None
+
+    return next_start, cron_expressions

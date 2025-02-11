@@ -7,7 +7,7 @@ import typing as t
 
 import yaml
 import click
-
+import re
 from sqlmesh import configure_logging
 from sqlmesh.cli import error_handler
 from sqlmesh.cli import options as opt
@@ -18,7 +18,9 @@ from sqlmesh.core.config import load_configs
 from sqlmesh.core.context import Context
 from sqlmesh.utils.date import TimeLike
 from sqlmesh.utils.errors import MissingDependencyError
-
+from sqlmesh.core.snapshot.definition import get_next_model_interval_start
+from sqlmesh.core.workflow_dataos import categorize_cron_jobs
+from sqlmesh.core.snapshot import Snapshot,to_table_mapping,DeployabilityIndex
 logger = logging.getLogger(__name__)
 
 SKIP_LOAD_COMMANDS = ("create_external_models", "migrate", "rollback", "run")
@@ -968,64 +970,70 @@ def dlt_refresh(
     else:
         ctx.obj.console.log_success("All SQLMesh models are up to date.")
 
+test = Context()
+test1 = test.snapshots
+next_start, cron_expressions = get_next_model_interval_start(test1.values())
 
+def sanitize_filename(cron_expression):
+    """Replace special characters in cron expressions to make a valid filename"""
+    return re.sub(r'[^a-zA-Z0-9_]', '_', cron_expression)
 
 @click.command()
-@click.option("-p", "--path", required=True, help="Specify the path where the YAML file will be created")
+@click.option("-p", "--path", required=True, help="Specify the path where the YAML files will be created")
 def create_wf(path):
-    """Creates a workflow YAML file in the specified path"""
-
-    # Define the YAML content
-    data = {
-        "version": "v1",
-        "name": "wf-sqlmesh-sync",
-        "type": "sqlmesh",
-        "workflow": {
-            "dag": [
-                {
-                    "name": "dg-sqlmesh-sync",
-                    "spec": {
-                        "stack": "sqlmesh",
-                        "tempVolume": "10Gi",
-                        "job": {
-                            "explain": True,
-                            "inputs": [
-                                {"name": "sqlmesh_input", "input": path}
-                            ],
-                            "logLevel": "INFO",
-                            "outputs": [
-                                {
-                                    "name": "output",
-                                    "dataset": f"{path}/config.yaml",
-                                    "format": "iceberg",
-                                    "description": "The dataset contains Adobe 2024 search data",
-                                    "options": {"saveMode": "append"}
-                                }
-                            ],
-                            "steps": [
-                                "sqlmesh plan dev",
-                                "sqlmesh ui"
-                            ]
+    """Creates workflow YAML files in the specified path based on cron expressions"""
+    cron_list =cron_expressions  # Example cron expressions
+    categorized_crons = categorize_cron_jobs(cron_list)
+    
+    def write_yaml(cron_expression):
+        safe_cron_expr = sanitize_filename(cron_expression)
+        data = {
+            "version": "v1",
+            "name": f"wf-sqlmesh-sync-{safe_cron_expr}",
+            "type": "sqlmesh",
+            "workflow": {
+                "cron": cron_expression,
+                "dag": [
+                    {
+                        "name": "dg-sqlmesh-sync",
+                        "spec": {
+                            "stack": "sqlmesh",
+                            "tempVolume": "10Gi",
+                            "job": {
+                                "explain": True,
+                                "inputs": [
+                                    {"name": "sqlmesh_input", "input": path}
+                                ],
+                                "logLevel": "INFO",
+                                "outputs": [
+                                    {
+                                        "name": "output",
+                                        "dataset": f"{path}/config.yaml",
+                                        "format": "iceberg",
+                                        "description": "The dataset contains Adobe 2024 search data",
+                                        "options": {"saveMode": "append"}
+                                    }
+                                ],
+                                "steps": [
+                                    "sqlmesh plan dev",
+                                    "sqlmesh ui"
+                                ]
+                            }
                         }
                     }
-                }
-            ]
+                ]
+            }
         }
-    }
+        os.makedirs(path, exist_ok=True)
+        file_path = os.path.join(path, f"workflow_{safe_cron_expr}.yaml")
+        with open(file_path, "w") as f:
+            yaml.dump(data, f, default_flow_style=False)
+        click.echo(f"Workflow YAML file created at {file_path}")
+    
+    for cron in categorized_crons["merged_recurring"]:
+        write_yaml(cron)
+    for cron in categorized_crons["specific_time_crons"] + categorized_crons["separate_recurring"]:
+        write_yaml(cron)
 
-    # Ensure the directory exists
-    os.makedirs(path, exist_ok=True)
-
-    # Define file path
-    file_path = os.path.join(path, "workflow.yaml")
-
-    # Write the YAML file
-    with open(file_path, "w") as f:
-        yaml.dump(data, f, default_flow_style=False)
-
-    click.echo(f"Workflow YAML file created at {file_path}")
-
-# Add the new command to the CLI
 from sqlmesh.cli.main import cli
 cli.add_command(create_wf)
-
