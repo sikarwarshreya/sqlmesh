@@ -5,6 +5,7 @@ import os
 import sys
 import typing as t
 
+import yaml
 import click
 
 from sqlmesh import configure_logging
@@ -966,3 +967,65 @@ def dlt_refresh(
         ctx.obj.console.log_success(f"Updated SQLMesh project with models:\n{model_names}")
     else:
         ctx.obj.console.log_success("All SQLMesh models are up to date.")
+
+
+
+@click.command()
+@click.option("-p", "--path", required=True, help="Specify the path where the YAML file will be created")
+def create_wf(path):
+    """Creates a workflow YAML file in the specified path"""
+
+    # Define the YAML content
+    data = {
+        "version": "v1",
+        "name": "wf-sqlmesh-sync",
+        "type": "sqlmesh",
+        "workflow": {
+            "dag": [
+                {
+                    "name": "dg-sqlmesh-sync",
+                    "spec": {
+                        "stack": "sqlmesh",
+                        "tempVolume": "10Gi",
+                        "job": {
+                            "explain": True,
+                            "inputs": [
+                                {"name": "sqlmesh_input", "input": path}
+                            ],
+                            "logLevel": "INFO",
+                            "outputs": [
+                                {
+                                    "name": "output",
+                                    "dataset": f"{path}/config.yaml",
+                                    "format": "iceberg",
+                                    "description": "The dataset contains Adobe 2024 search data",
+                                    "options": {"saveMode": "append"}
+                                }
+                            ],
+                            "steps": [
+                                "sqlmesh plan dev",
+                                "sqlmesh ui"
+                            ]
+                        }
+                    }
+                }
+            ]
+        }
+    }
+
+    # Ensure the directory exists
+    os.makedirs(path, exist_ok=True)
+
+    # Define file path
+    file_path = os.path.join(path, "workflow.yaml")
+
+    # Write the YAML file
+    with open(file_path, "w") as f:
+        yaml.dump(data, f, default_flow_style=False)
+
+    click.echo(f"Workflow YAML file created at {file_path}")
+
+# Add the new command to the CLI
+from sqlmesh.cli.main import cli
+cli.add_command(create_wf)
+
